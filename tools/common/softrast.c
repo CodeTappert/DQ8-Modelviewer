@@ -175,9 +175,10 @@ void sr_draw(SrImage *im, int ox, int oy, int vw, int vh, const SrTriList *tl, c
                     tx = tx < 0 ? 0 : tx >= et->width ? et->width - 1 : tx;
                     ty = ty < 0 ? 0 : ty >= et->height ? et->height - 1 : ty;
                     uint32_t ec = et->rgba[ty * et->width + tx];   /* 0xAABBGGRR */
-                    *dst = 0xFF000000u | (uint32_t)clamp8(dr + (ec & 0xff) * t->env_rgb[0]) << 16
-                         | (uint32_t)clamp8(dg + ((ec >> 8) & 0xff) * t->env_rgb[1]) << 8
-                         | clamp8(db + ((ec >> 16) & 0xff) * t->env_rgb[2]);
+                    float ea = (float)(ec >> 24) / 255.0f;          /* GS additive blend weights by source alpha */
+                    *dst = 0xFF000000u | (uint32_t)clamp8(dr + (ec & 0xff) * ea * t->env_rgb[0]) << 16
+                         | (uint32_t)clamp8(dg + ((ec >> 8) & 0xff) * ea * t->env_rgb[1]) << 8
+                         | clamp8(db + ((ec >> 16) & 0xff) * ea * t->env_rgb[2]);
                     continue;
                 }
                 if (z <= im->z[at]) {

@@ -43,6 +43,7 @@ dq8-model-viewer [filter] [--iso <path to game.iso>] [--anim N]
 
 The ISO is looked up in this order: `--iso`, the `DQ8_ISO` environment variable
 (or `DQ8_DATA_DIR` for an extracted disc), the last ISO you opened, and finally
+the file dialog. If a given ISO cannot be opened, the viewer says so and shows
 the file dialog. To pick a different ISO later, start the viewer with `--iso`.
 
 ### Controls
@@ -58,6 +59,7 @@ Press **F1** in the window to show them.
 | Space | Play / pause |
 | `,` / `.` | Step one frame back / forward |
 | Mouse drag | Orbit the camera |
+| Right or middle drag, Shift + drag | Move the model on screen |
 | Mouse wheel | Zoom |
 | 1 / 2 / 3 | Front / side / three-quarter view |
 | R | Reset the camera |
@@ -135,3 +137,7 @@ Dragon Quest is a trademark of Square Enix. The viewer contains no game code or
 assets. It only reads data from a disc image you provide.
 
 Licensed under the [MIT License](LICENSE).
+
+## AI usage
+
+This project was written with the help of AI coding assistants. All changes are reviewed and tested by the maintainer.

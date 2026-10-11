@@ -15,6 +15,7 @@
  *   Left/Right     previous/next animation (first entry = T-pose)
  *   Space          play/pause              , .        step one frame
  *   mouse drag     orbit                   wheel      zoom
+ *   right/middle drag (or Shift+drag)  move the model
  *   1 2 3          front / side / 3-4 view R          reset camera
  *   /              search (type, Enter)    T          texture animation on/off
  *   S              screenshot (BMP in ./screenshots)
@@ -293,7 +294,16 @@ static void handle_input(Viewer *v, float dt)
     float dx, dy;
     dq8_platform_mouse(&mx, &my, &buttons);
     dq8_platform_mouse_motion(&dx, &dy);
-    if (buttons & 1) {
+    int pan = (buttons & 6) || ((buttons & 1) && dq8_platform_key_down(DQ8_KEY_SHIFT));
+    if (pan && v->zw) {   /* move the camera centre along the screen axes */
+        int side = v->zw < v->zh ? v->zw : v->zh;
+        float s = v->base_scale * side * v->zoom;
+        float cy = cosf(v->yaw), sy = sinf(v->yaw), cp = cosf(v->pitch), sp = sinf(v->pitch);
+        float right[3] = { cy, 0, -sy }, up[3] = { -sp * sy, cp, -sp * cy };
+        for (int c = 0; c < 3 && s > 0; c++) {
+            v->center[c] += (-right[c] * dx + up[c] * dy) / s;
+        }
+    } else if (buttons & 1) {
         v->yaw += dx * 0.01f;
         v->pitch = fmaxf(-1.5f, fminf(1.5f, v->pitch + dy * 0.01f));
     }
@@ -323,6 +333,7 @@ static void draw(Viewer *v, Dq8Framebuffer *fb)
     sr_clear(&im, 0, 0, fb->width, fb->height, 0xFF282828u);
     Scene *s = v->scene;
     if (s && s->m) {
+        scene_set_view(s, v->yaw, v->pitch);
         float frame = v->anim >= 0 ? v->frame : (s->key_count ? (float)s->keys[0].start : 0);
         if (v->anim >= 0) {
             scene_pose(s, v->frame, v->pose);
@@ -389,7 +400,7 @@ static void draw(Viewer *v, Dq8Framebuffer *fb)
         static const char *help[] = {
             "Up/Down: model   PgUp/PgDn: +-20   Home/End: first/last",
             "Left/Right: animation (first = T-pose)   Space: play/pause   , . : step frame",
-            "Mouse drag: orbit   Wheel: zoom   1/2/3: front/side/3-4   R: reset camera",
+            "Drag: orbit  Right-drag or Shift+drag: move  Wheel: zoom  1/2/3: views  R: reset",
             "/: search models   T: texture animation   S: screenshot   Esc: quit",
         };
         for (int i = 0; i < 4; i++) {
@@ -417,23 +428,28 @@ static void last_iso_path(char *out, size_t len)
     snprintf(out, len, "%slast_iso.txt", dq8_platform_pref_dir());
 }
 
-/* --iso, then $DQ8_DATA_DIR / $DQ8_ISO, then the remembered ISO, then a file
- * dialog until a valid ISO is picked or the user cancels. */
+/* --iso, else $DQ8_DATA_DIR or $DQ8_ISO, else the remembered ISO; if that fails
+ * (with a message box for a given path), a file dialog until a valid ISO is
+ * picked or the user cancels. */
 static Dq8Archive *find_disc(const char *iso_arg)
 {
     char path[1024] = "", cfg[1024];
     last_iso_path(cfg, sizeof(cfg));
     Dq8Archive *a = NULL;
-    if (iso_arg) {
-        snprintf(path, sizeof(path), "%s", iso_arg);
-        if (!(a = open_disc(path, 0))) {
-            fprintf(stderr, "cannot open %s as a DQ8 ISO\n", path);
-            return NULL;
+    char msg[1200];
+    if (!iso_arg && getenv("DQ8_DATA_DIR")) {
+        if (!(a = open_disc(getenv("DQ8_DATA_DIR"), 1))) {
+            dq8_platform_message("DQ8 Model Viewer", "DQ8_DATA_DIR does not contain the game's DATA archive.");
         }
-    } else if (getenv("DQ8_DATA_DIR")) {
-        return open_disc(getenv("DQ8_DATA_DIR"), 1);
-    } else if (getenv("DQ8_ISO")) {
-        return open_disc(getenv("DQ8_ISO"), 0);
+        return a;
+    }
+    const char *given = iso_arg ? iso_arg : getenv("DQ8_ISO");
+    if (given) {
+        snprintf(path, sizeof(path), "%s", given);
+        if (!(a = open_disc(path, 0))) {
+            snprintf(msg, sizeof(msg), "Cannot open \"%s\" as a Dragon Quest VIII (PS2) ISO. Pick the ISO instead.", path);
+            dq8_platform_message("DQ8 Model Viewer", msg);
+        }
     } else {
         FILE *f = fopen(cfg, "rb");
         if (f) {
@@ -443,13 +459,13 @@ static Dq8Archive *find_disc(const char *iso_arg)
             fclose(f);
             a = open_disc(path, 0);
         }
-        while (!a) {
-            if (!dq8_platform_pick_file("Dragon Quest VIII ISO", "iso", path, sizeof(path))) {
-                return NULL;
-            }
-            if (!(a = open_disc(path, 0))) {
-                dq8_platform_message("DQ8 Model Viewer", "That file is not a Dragon Quest VIII (PS2) ISO. Pick another one.");
-            }
+    }
+    while (!a) {
+        if (!dq8_platform_pick_file("Dragon Quest VIII ISO", "iso", path, sizeof(path))) {
+            return NULL;
+        }
+        if (!(a = open_disc(path, 0))) {
+            dq8_platform_message("DQ8 Model Viewer", "That file is not a Dragon Quest VIII (PS2) ISO. Pick another one.");
         }
     }
     FILE *f = fopen(cfg, "wb");

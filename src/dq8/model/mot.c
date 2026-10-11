@@ -30,10 +30,12 @@ static int components(int type)
 }
 
 /* Channel header at `ch` (offsets inside are relative to `ch`). Version 1 is
- * 0x20 bytes: u8 flags[4] (scaled, value size, time size, 0), s16, u16 count,
- * u32 times, u32 values, f32[4] scale. Version 0 (converted in place by
- * FUN_0014c310) is 0x40 bytes of u32 words: flags at +0x04/+0x08/+0x0C, count
- * +0x18, times +0x1C, values +0x20, scale at +0x30. Value size codes match the
+ * 0x20 bytes: u8 flags[4] (scaled, value size, time size, 0), s16 start
+ * frame, u16 count, u32 times, u32 values, f32[4] scale. Version 0 (converted
+ * in place by FUN_0014c310) is 0x40 bytes of u32 words: flags at
+ * +0x04/+0x08/+0x0C, start frame +0x14, count +0x18, times +0x1C, values +0x20,
+ * scale at +0x30. The start frame equals the first key time; a channel without
+ * a time array has one key per frame from it. Value size codes match the
  * MDS format word: 0x20 float32, 0x10 int16, 0x08 int8. */
 static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
 {
@@ -43,10 +45,12 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     }
     const uint8_t *p = mot->blob + ch;
     uint32_t count, times, values, scaled, vsize;
+    int start;
     const uint8_t *sc;
     if (mot->version == 0) {
         scaled = rd32(p + 0x04);
         vsize = rd32(p + 0x08);
+        start = (int32_t)rd32(p + 0x14);
         count = rd32(p + 0x18);
         times = rd32(p + 0x1c);
         values = rd32(p + 0x20);
@@ -54,6 +58,7 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     } else {
         scaled = p[0];
         vsize = p[1];
+        start = (int16_t)rd16(p + 4);
         count = rd16(p + 6);
         times = rd32(p + 8);
         values = rd32(p + 12);
@@ -72,10 +77,11 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     out->value_size = (int)vsize;
     out->scaled = scaled != 0;
     out->count = (int)count;
+    out->start = start;
     out->times = times ? (uint32_t)(ch + times) : 0;
     out->values = (uint32_t)(ch + values);
     memcpy(out->scale, sc, sizeof(out->scale));
-    int last = times ? (int16_t)rd16(mot->blob + out->times + (count - 1) * 2) : (int)count - 1;
+    int last = times ? (int16_t)rd16(mot->blob + out->times + (count - 1) * 2) : start + (int)count - 1;
     if (last + 1 > mot->frame_count) {
         mot->frame_count = last + 1;
     }
@@ -204,7 +210,7 @@ static void key_value(const Dq8Mot *mot, const Dq8MotChannel *c, int k, float ou
 
 static float key_time(const Dq8Mot *mot, const Dq8MotChannel *c, int k)
 {
-    return c->times ? (float)(int16_t)rd16(mot->blob + c->times + (size_t)k * 2) : (float)k;
+    return c->times ? (float)(int16_t)rd16(mot->blob + c->times + (size_t)k * 2) : (float)(c->start + k);
 }
 
 bool dq8_mot_sample_list(const Dq8Mot *mot, int list, int index, int type, float frame,
@@ -302,12 +308,9 @@ bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *wo
                 }
             }
         }
+        float s[3] = { 1, 1, 1 };
         if (dq8_mot_sample(mot, b, DQ8_MOT_SCALE, frame, v)) {
-            for (int r = 0; r < 3; r++) {
-                for (int c = 0; c < 3; c++) {
-                    L[r * 4 + c] *= v[r];
-                }
-            }
+            memcpy(s, v, sizeof(s));
         }
         if (dq8_mot_sample(mot, b, DQ8_MOT_TRANSLATE, frame, v)) {
             L[12] = v[0];
@@ -316,13 +319,64 @@ bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *wo
         }
         /* parents precede children in every file seen; compose in place */
         int p = dq8_mds_bone_parent(model, b);
-        if (p >= 0 && p < b) {
-            mat_mul(L, worlds + (size_t)p * 16, L);
-        } else if (p >= b) {
+        if (p >= b) {
             return false;
         }
+        if (p < 0 || !(dq8_mds_bone_flags(model, b) & DQ8_MDS_BONE_SCALE_COMPENSATE)) {
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 3; c++) {
+                    L[r * 4 + c] *= s[r];
+                }
+            }
+            if (p >= 0) {
+                mat_mul(L, worlds + (size_t)p * 16, L);
+            }
+            continue;
+        }
+        /* Scale-compensating bone (the game's mgCFrame update, FUN_00149b30):
+         * rotation composes with the parent's normalized axes, the parent's
+         * per-axis scale times the bone's own is applied along the bone's own
+         * axes (no shear), and the translation goes through the full parent
+         * matrix. A sleeve squashed by a parent's scale thus stays straight. */
+        const float *P = worlds + (size_t)p * 16;
+        float N[16], W[16];
+        memcpy(N, P, sizeof(N));
+        for (int r = 0; r < 3; r++) {
+            float len = sqrtf(P[r * 4] * P[r * 4] + P[r * 4 + 1] * P[r * 4 + 1] + P[r * 4 + 2] * P[r * 4 + 2]);
+            s[r] *= len;
+            for (int c = 0; c < 3; c++) {
+                N[r * 4 + c] = len > 0 ? P[r * 4 + c] / len : 0;
+            }
+        }
+        mat_mul(L, N, W);   /* rotation part; row 3 recomputed below */
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                W[r * 4 + c] *= s[r];
+            }
+        }
+        for (int c = 0; c < 3; c++) {
+            W[12 + c] = L[12] * P[c] + L[13] * P[4 + c] + L[14] * P[8 + c] + P[12 + c];
+        }
+        memcpy(L, W, sizeof(W));
     }
     return true;
+}
+
+int dq8_mot_remap_bones(Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target)
+{
+    int changed = 0;
+    for (int t = 0; mot && rig && target && t < mot->track_count; t++) {
+        Dq8MotTrack *tr = &mot->tracks[t];
+        if (tr->list != 0 || tr->bone < 0) {
+            continue;
+        }
+        int to = dq8_mds_bone_find(target, dq8_mds_bone_name(rig, tr->bone));
+        if (to != tr->bone) {
+            tr->bone = to;   /* -1: no such bone, never sampled */
+            changed++;
+        }
+    }
+    return changed;
 }
 
 bool dq8_mot_mesh_visible(const Dq8Mot *mot, const Dq8Mds *model, int mesh_index, float frame)
@@ -404,6 +458,84 @@ bool dq8_mot_pose_retarget(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *t
     }
     free(rw);
     return true;
+}
+
+static void normalize3(float *v)
+{
+    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    for (int i = 0; i < 3 && l > 0; i++) {
+        v[i] /= l;
+    }
+}
+
+static void cross3(const float *a, const float *b, float *out)
+{
+    out[0] = a[1] * b[2] - b[1] * a[2];
+    out[1] = a[2] * b[0] - b[2] * a[0];
+    out[2] = a[0] * b[1] - b[0] * a[1];
+}
+
+/* Orient world matrix W (keeping its axis scales and position) like the
+ * game's mgCFrame update (FUN_00149b30, frame flags & 6). */
+static void billboard(float *W, unsigned flags, const float eye[3])
+{
+    float s[3], x[3], y[3], z[3] = { eye[0] - W[12], eye[1] - W[13], eye[2] - W[14] };
+    for (int r = 0; r < 3; r++) {
+        s[r] = sqrtf(W[r * 4] * W[r * 4] + W[r * 4 + 1] * W[r * 4 + 1] + W[r * 4 + 2] * W[r * 4 + 2]);
+    }
+    if (flags & DQ8_MDS_BONE_BILLBOARD_Y) {   /* turn about the world Y axis only */
+        z[1] = 0;
+        normalize3(z);
+        x[0] = z[2], x[1] = 0, x[2] = -z[0];
+        y[0] = 0, y[1] = 1, y[2] = 0;
+    } else {                                  /* +Z faces the eye, up stays up */
+        static const float up[3] = { 0, 1, 0 };
+        normalize3(z);
+        cross3(up, z, x);
+        normalize3(x);
+        cross3(z, x, y);
+    }
+    for (int c = 0; c < 3; c++) {
+        W[c] = x[c] * s[0];
+        W[4 + c] = y[c] * s[1];
+        W[8 + c] = z[c] * s[2];
+    }
+}
+
+void dq8_mot_billboard(const Dq8Mds *model, float *worlds, const float eye[3])
+{
+    int n = model && worlds && eye ? (int)model->bone_count : 0;
+    float *old = NULL;
+    unsigned char *moved = NULL;
+    for (int b = 0; b < n; b++) {
+        unsigned flags = dq8_mds_bone_flags(model, b);
+        int p = dq8_mds_bone_parent(model, b);
+        int follow = p >= 0 && p < b && moved && moved[p];
+        if (!(flags & DQ8_MDS_BONE_BILLBOARD) && !follow) {
+            continue;
+        }
+        if (!old) {   /* first change: keep the unrotated pose for descendants */
+            old = malloc(sizeof(float) * 16 * (size_t)n);
+            moved = calloc((size_t)n, 1);
+            if (!old || !moved) {
+                break;
+            }
+            memcpy(old, worlds, sizeof(float) * 16 * (size_t)n);
+        }
+        float *W = worlds + (size_t)b * 16;
+        if (follow) {   /* keep the pose relative to the re-oriented parent */
+            float inv[16], rel[16];
+            inv_affine(old + (size_t)p * 16, inv);
+            mat_mul(old + (size_t)b * 16, inv, rel);
+            mat_mul(rel, worlds + (size_t)p * 16, W);
+        }
+        if (flags & DQ8_MDS_BONE_BILLBOARD) {
+            billboard(W, flags, eye);
+        }
+        moved[b] = 1;
+    }
+    free(old);
+    free(moved);
 }
 
 float dq8_mot_name_coverage(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target)

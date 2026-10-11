@@ -102,6 +102,14 @@ int dq8_mds_bone_find(const Dq8Mds *m, const char *name);
 /* Parent of `bone` (-1 = root or error). */
 int dq8_mds_bone_parent(const Dq8Mds *m, int bone);
 
+/* Bone flags (bone +0x14, copied to the game's mgCFrame +0x26). */
+enum {
+    DQ8_MDS_BONE_BILLBOARD = 0x06,       /* faces the camera, see dq8_mot_billboard */
+    DQ8_MDS_BONE_BILLBOARD_Y = 0x04,     /* ... turning about world Y only (else fully) */
+    DQ8_MDS_BONE_SCALE_COMPENSATE = 0x10 /* scale does not shear children, see dq8_mot_pose */
+};
+unsigned dq8_mds_bone_flags(const Dq8Mds *m, int bone);
+
 /* Local (parent-relative) matrix of `bone`, bone +0x20. */
 bool dq8_mds_bone_local(const Dq8Mds *m, int bone, float out[16]);
 

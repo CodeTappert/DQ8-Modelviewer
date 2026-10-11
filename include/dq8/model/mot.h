@@ -33,7 +33,8 @@ typedef struct Dq8MotChannel {
     int      value_size;    /* 0x20 float32, 0x10 int16, 0x08 int8 */
     bool     scaled;        /* flag byte 0: integer values use `scale` */
     int      count;         /* keys */
-    uint32_t times;         /* offset of s16[count] frame numbers (may be < 0), 0 = per frame */
+    int      start;         /* first key's frame (per-frame keys run from it) */
+    uint32_t times;         /* offset of s16[count] frame numbers (may be < 0), 0 = per frame from `start` */
     uint32_t values;        /* offset of value[count][components] */
     float    scale[4];
 } Dq8MotChannel;
@@ -77,7 +78,9 @@ bool dq8_mot_sample_list(const Dq8Mot *mot, int list, int index, int type, float
  * Per bone, starting from its local matrix (bone +0x20): the rotation track
  * replaces the 3x3 (quaternion), the scale track pre-multiplies it
  * (diag(s) * R), the translation track replaces row 3; then
- * World = Local * World[parent]. Bones without tracks keep their local matrix.
+ * World = Local * World[parent], or, for bones flagged
+ * DQ8_MDS_BONE_SCALE_COMPENSATE, the game's unsheared composition (see the
+ * code). Bones without tracks keep their local matrix.
  * Returns false on error. See the MOT format notes section 4. */
 bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *worlds);
 
@@ -95,6 +98,21 @@ bool dq8_mot_pose_retarget(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *t
  * `target`; 1 when rig == target. Used to decide whether a motion belongs to a
  * model. */
 float dq8_mot_name_coverage(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target);
+
+/* Turn the billboard bones (DQ8_MDS_BONE_BILLBOARD flags) of a posed model
+ * toward the camera at `eye` (world position), as the game does after
+ * composing a bone: flag 2 points the bone's +Z at the eye with +Y kept up
+ * (x = up × z, y = z × x), flag 4 turns it about world Y only. Axis scales and
+ * positions are kept; descendants keep their pose relative to the turned bone. */
+void dq8_mot_billboard(const Dq8Mds *model, float *worlds, const float eye[3]);
+
+/* Re-point list-A tracks authored for skeleton `rig` at the bones of `target`
+ * with the same name (tracks whose bone `target` lacks are dropped). Motions
+ * store bone indices, not names, and a character's skin model may order its
+ * bones differently from the skeleton the motions were made on (c002_base1
+ * has head/eye/obj2 at 30-32, c002_skin1 obj2/head/eye). Returns the number of
+ * tracks whose index changed or that were dropped. */
+int dq8_mot_remap_bones(Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target);
 
 /* Is mesh `mesh_index` of `model` visible at `frame`? A visibility track
  * (DQ8_MOT_VISIBLE, stepped 0/1) on the mesh's owner bone or any ancestor

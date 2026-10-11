@@ -283,6 +283,14 @@ int dq8_mds_bone_parent(const Dq8Mds *m, int bone)
     return (p >= 0 && (uint32_t)p < m->bone_count) ? p : -1;
 }
 
+unsigned dq8_mds_bone_flags(const Dq8Mds *m, int bone)
+{
+    if (!m || bone < 0 || (uint32_t)bone >= m->bone_count || !bones_valid(m)) {
+        return 0;
+    }
+    return rd32(bone_rec(m, bone) + 0x14) & 0xffff;
+}
+
 bool dq8_mds_bone_local(const Dq8Mds *m, int bone, float out[16])
 {
     if (!m || !out || bone < 0 || (uint32_t)bone >= m->bone_count || !bones_valid(m)) {

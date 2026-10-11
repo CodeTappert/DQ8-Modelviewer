@@ -733,6 +733,7 @@ Scene *scene_load(Dq8Archive *a, const char *unit)
     }
 
     Scene *meta = calloc(1, sizeof(*meta));
+    scene_set_view(meta, 0.6109f, 0.2618f);   /* 3/4 view until the caller sets one */
     snprintf(meta->unit, sizeof(meta->unit), "%s", unit);
     scene_note(meta, "unit=%s", unit);
 
@@ -860,6 +861,24 @@ Scene *scene_load(Dq8Archive *a, const char *unit)
         return meta;
     }
     load_textures(&mem);
+    /* Character motions are indexed by the <id>_base1 skeleton; a skin model
+     * may order the same bones differently (c002: the head track would turn
+     * the helmet bone). Re-point tracks by name when the orders differ. */
+    if (mot && !retarget && !strchr(unit, ':')) {
+        const char *base = strrchr(unit, '/');
+        base = base ? base + 1 : unit;
+        const char *us = strchr(base, '_');
+        char rig_path[256];
+        snprintf(rig_path, sizeof(rig_path), "%.*s_base1.chr", (int)((us ? us : strchr(base, '.')) - unit), unit);
+        Dq8Mds *skel = (us || strstr(unit, ".chr")) && strcmp(rig_path, unit) != 0 ? dq8_mds_load_archive(a, rig_path) : NULL;
+        if (skel && mot_fits(mot, skel) && dq8_mot_name_coverage(mot, skel, m) >= 0.9f) {
+            int moved = dq8_mot_remap_bones(mot, skel, m);
+            if (moved) {
+                scene_note(meta, "note=motion indexed by %s; %d track(s) re-pointed by bone name\n", rig_path, moved);
+            }
+        }
+        dq8_mds_free(skel);
+    }
     if (mot && !retarget && !mot_fits(mot, m)) {
         scene_note(meta, "note=motion %s references bones beyond the model; ignored\n", mot_src);
         dq8_mot_free(mot);
@@ -1016,13 +1035,28 @@ int scene_pose(const Scene *s, float frame, float *pose)
     if (!s || !s->m) {
         return 0;
     }
+    int ok = 1;
     if (!s->mot || frame < 0) {
         for (uint32_t b = 0; b < s->m->bone_count; b++) {
             dq8_mds_bone_world(s->m, (int)b, pose + (size_t)b * 16);
         }
-        return 1;
+    } else {
+        ok = pose_at(s->mot, s->rig, s->m, frame, pose);
     }
-    return pose_at(s->mot, s->rig, s->m, frame, pose);
+    if (ok) {   /* billboard bones face the (orthographic) camera: an eye far along the view axis */
+        float cy = cosf(s->view_yaw), sy = sinf(s->view_yaw), cp = cosf(s->view_pitch), sp = sinf(s->view_pitch);
+        float eye[3] = { cp * sy * 1e6f, sp * 1e6f, cp * cy * 1e6f };
+        dq8_mot_billboard(s->m, pose, eye);
+    }
+    return ok;
+}
+
+void scene_set_view(Scene *s, float yaw, float pitch)
+{
+    if (s) {
+        s->view_yaw = yaw;
+        s->view_pitch = pitch;
+    }
 }
 
 void scene_tris(const Scene *s, const float *pose, float frame, int state, SrTriList *out)
