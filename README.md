@@ -136,3 +136,7 @@ Dragon Quest is a trademark of Square Enix. The viewer contains no game code or
 assets. It only reads data from a disc image you provide.
 
 Licensed under the [MIT License](LICENSE).
+
+## AI usage
+
+This project was written with the help of AI coding assistants. All changes are reviewed and tested by the maintainer.
