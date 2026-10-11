@@ -1,0 +1,29 @@
+# Game data: never commit
+*.iso
+*.bin
+*.img
+*.mds
+*.mot
+*.chr
+*.pak
+*.tm2
+DATA.*
+
+# Build output
+build/
+cmake-build-*/
+out/
+dist/
+screenshots/
+compile_commands.json
+*.exe
+*.o
+*.obj
+
+# Editors / OS
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

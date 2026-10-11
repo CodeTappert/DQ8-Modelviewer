@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: v
+        shell: bash
+        run: |
+          latest=$(git tag -l 'v1.0.*' | sed -E 's/^v1\.0\.([0-9]+).*/\1/' | sort -n | tail -1)
+          next=$(( ${latest:--1} + 1 ))
+          echo "version=1.0.${next}-$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    name: Build (Linux)
+    needs: version
+    # oldest supported runner: the binary then runs on any newer glibc
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install SDL build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build pkg-config libx11-dev libxext-dev libxrandr-dev \
+            libxcursor-dev libxi-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev \
+            wayland-protocols libegl1-mesa-dev libgl1-mesa-dev libdbus-1-dev libudev-dev libdecor-0-dev
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDQ8_FETCH_SDL=ON -DDQ8_VERSION=${{ needs.version.outputs.version }}
+      - name: Build
+        run: cmake --build build
+      - name: Package
+        run: |
+          mkdir -p dist/dq8-model-viewer
+          cp build/dq8-model-viewer README.md LICENSE dist/dq8-model-viewer/
+          tar -C dist -czf dq8-model-viewer-linux-x64.tar.gz dq8-model-viewer
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dq8-model-viewer-linux-x64.tar.gz
+
+  windows:
+    name: Build (Windows)
+    needs: version
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: git zip mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+      - name: Configure
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDQ8_FETCH_SDL=ON -DDQ8_VERSION=${{ needs.version.outputs.version }}
+      - name: Build
+        run: cmake --build build
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/dq8-model-viewer.exe README.md LICENSE dist/
+          (cd dist && zip -r ../dq8-model-viewer-windows-x64.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dq8-model-viewer-windows-x64.zip
+
+  release:
+    name: Release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [version, linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: v${{ needs.version.outputs.version }}
+          files: artifacts/**/*
+          generate_release_notes: true
