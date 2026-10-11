@@ -308,12 +308,9 @@ bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *wo
                 }
             }
         }
+        float s[3] = { 1, 1, 1 };
         if (dq8_mot_sample(mot, b, DQ8_MOT_SCALE, frame, v)) {
-            for (int r = 0; r < 3; r++) {
-                for (int c = 0; c < 3; c++) {
-                    L[r * 4 + c] *= v[r];
-                }
-            }
+            memcpy(s, v, sizeof(s));
         }
         if (dq8_mot_sample(mot, b, DQ8_MOT_TRANSLATE, frame, v)) {
             L[12] = v[0];
@@ -322,13 +319,64 @@ bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *wo
         }
         /* parents precede children in every file seen; compose in place */
         int p = dq8_mds_bone_parent(model, b);
-        if (p >= 0 && p < b) {
-            mat_mul(L, worlds + (size_t)p * 16, L);
-        } else if (p >= b) {
+        if (p >= b) {
             return false;
         }
+        if (p < 0 || !(dq8_mds_bone_flags(model, b) & DQ8_MDS_BONE_SCALE_COMPENSATE)) {
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 3; c++) {
+                    L[r * 4 + c] *= s[r];
+                }
+            }
+            if (p >= 0) {
+                mat_mul(L, worlds + (size_t)p * 16, L);
+            }
+            continue;
+        }
+        /* Scale-compensating bone (the game's mgCFrame update, FUN_00149b30):
+         * rotation composes with the parent's normalized axes, the parent's
+         * per-axis scale times the bone's own is applied along the bone's own
+         * axes (no shear), and the translation goes through the full parent
+         * matrix. A sleeve squashed by a parent's scale thus stays straight. */
+        const float *P = worlds + (size_t)p * 16;
+        float N[16], W[16];
+        memcpy(N, P, sizeof(N));
+        for (int r = 0; r < 3; r++) {
+            float len = sqrtf(P[r * 4] * P[r * 4] + P[r * 4 + 1] * P[r * 4 + 1] + P[r * 4 + 2] * P[r * 4 + 2]);
+            s[r] *= len;
+            for (int c = 0; c < 3; c++) {
+                N[r * 4 + c] = len > 0 ? P[r * 4 + c] / len : 0;
+            }
+        }
+        mat_mul(L, N, W);   /* rotation part; row 3 recomputed below */
+        for (int r = 0; r < 3; r++) {
+            for (int c = 0; c < 3; c++) {
+                W[r * 4 + c] *= s[r];
+            }
+        }
+        for (int c = 0; c < 3; c++) {
+            W[12 + c] = L[12] * P[c] + L[13] * P[4 + c] + L[14] * P[8 + c] + P[12 + c];
+        }
+        memcpy(L, W, sizeof(W));
     }
     return true;
+}
+
+int dq8_mot_remap_bones(Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target)
+{
+    int changed = 0;
+    for (int t = 0; mot && rig && target && t < mot->track_count; t++) {
+        Dq8MotTrack *tr = &mot->tracks[t];
+        if (tr->list != 0 || tr->bone < 0) {
+            continue;
+        }
+        int to = dq8_mds_bone_find(target, dq8_mds_bone_name(rig, tr->bone));
+        if (to != tr->bone) {
+            tr->bone = to;   /* -1: no such bone, never sampled */
+            changed++;
+        }
+    }
+    return changed;
 }
 
 bool dq8_mot_mesh_visible(const Dq8Mot *mot, const Dq8Mds *model, int mesh_index, float frame)

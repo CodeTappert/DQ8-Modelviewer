@@ -78,7 +78,9 @@ bool dq8_mot_sample_list(const Dq8Mot *mot, int list, int index, int type, float
  * Per bone, starting from its local matrix (bone +0x20): the rotation track
  * replaces the 3x3 (quaternion), the scale track pre-multiplies it
  * (diag(s) * R), the translation track replaces row 3; then
- * World = Local * World[parent]. Bones without tracks keep their local matrix.
+ * World = Local * World[parent], or, for bones flagged
+ * DQ8_MDS_BONE_SCALE_COMPENSATE, the game's unsheared composition (see the
+ * code). Bones without tracks keep their local matrix.
  * Returns false on error. See the MOT format notes section 4. */
 bool dq8_mot_pose(const Dq8Mot *mot, const Dq8Mds *model, float frame, float *worlds);
 
@@ -96,6 +98,14 @@ bool dq8_mot_pose_retarget(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *t
  * `target`; 1 when rig == target. Used to decide whether a motion belongs to a
  * model. */
 float dq8_mot_name_coverage(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target);
+
+/* Re-point list-A tracks authored for skeleton `rig` at the bones of `target`
+ * with the same name (tracks whose bone `target` lacks are dropped). Motions
+ * store bone indices, not names, and a character's skin model may order its
+ * bones differently from the skeleton the motions were made on (c002_base1
+ * has head/eye/obj2 at 30-32, c002_skin1 obj2/head/eye). Returns the number of
+ * tracks whose index changed or that were dropped. */
+int dq8_mot_remap_bones(Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target);
 
 /* Is mesh `mesh_index` of `model` visible at `frame`? A visibility track
  * (DQ8_MOT_VISIBLE, stepped 0/1) on the mesh's owner bone or any ancestor

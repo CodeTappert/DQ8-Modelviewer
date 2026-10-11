@@ -860,6 +860,24 @@ Scene *scene_load(Dq8Archive *a, const char *unit)
         return meta;
     }
     load_textures(&mem);
+    /* Character motions are indexed by the <id>_base1 skeleton; a skin model
+     * may order the same bones differently (c002: the head track would turn
+     * the helmet bone). Re-point tracks by name when the orders differ. */
+    if (mot && !retarget && !strchr(unit, ':')) {
+        const char *base = strrchr(unit, '/');
+        base = base ? base + 1 : unit;
+        const char *us = strchr(base, '_');
+        char rig_path[256];
+        snprintf(rig_path, sizeof(rig_path), "%.*s_base1.chr", (int)((us ? us : strchr(base, '.')) - unit), unit);
+        Dq8Mds *skel = (us || strstr(unit, ".chr")) && strcmp(rig_path, unit) != 0 ? dq8_mds_load_archive(a, rig_path) : NULL;
+        if (skel && mot_fits(mot, skel) && dq8_mot_name_coverage(mot, skel, m) >= 0.9f) {
+            int moved = dq8_mot_remap_bones(mot, skel, m);
+            if (moved) {
+                scene_note(meta, "note=motion indexed by %s; %d track(s) re-pointed by bone name\n", rig_path, moved);
+            }
+        }
+        dq8_mds_free(skel);
+    }
     if (mot && !retarget && !mot_fits(mot, m)) {
         scene_note(meta, "note=motion %s references bones beyond the model; ignored\n", mot_src);
         dq8_mot_free(mot);
