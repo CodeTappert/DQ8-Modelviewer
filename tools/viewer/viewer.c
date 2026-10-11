@@ -15,6 +15,7 @@
  *   Left/Right     previous/next animation (first entry = T-pose)
  *   Space          play/pause              , .        step one frame
  *   mouse drag     orbit                   wheel      zoom
+ *   right/middle drag (or Shift+drag)  move the model
  *   1 2 3          front / side / 3-4 view R          reset camera
  *   /              search (type, Enter)    T          texture animation on/off
  *   S              screenshot (BMP in ./screenshots)
@@ -293,7 +294,16 @@ static void handle_input(Viewer *v, float dt)
     float dx, dy;
     dq8_platform_mouse(&mx, &my, &buttons);
     dq8_platform_mouse_motion(&dx, &dy);
-    if (buttons & 1) {
+    int pan = (buttons & 6) || ((buttons & 1) && dq8_platform_key_down(DQ8_KEY_SHIFT));
+    if (pan && v->zw) {   /* move the camera centre along the screen axes */
+        int side = v->zw < v->zh ? v->zw : v->zh;
+        float s = v->base_scale * side * v->zoom;
+        float cy = cosf(v->yaw), sy = sinf(v->yaw), cp = cosf(v->pitch), sp = sinf(v->pitch);
+        float right[3] = { cy, 0, -sy }, up[3] = { -sp * sy, cp, -sp * cy };
+        for (int c = 0; c < 3 && s > 0; c++) {
+            v->center[c] += (-right[c] * dx + up[c] * dy) / s;
+        }
+    } else if (buttons & 1) {
         v->yaw += dx * 0.01f;
         v->pitch = fmaxf(-1.5f, fminf(1.5f, v->pitch + dy * 0.01f));
     }
@@ -389,7 +399,7 @@ static void draw(Viewer *v, Dq8Framebuffer *fb)
         static const char *help[] = {
             "Up/Down: model   PgUp/PgDn: +-20   Home/End: first/last",
             "Left/Right: animation (first = T-pose)   Space: play/pause   , . : step frame",
-            "Mouse drag: orbit   Wheel: zoom   1/2/3: front/side/3-4   R: reset camera",
+            "Drag: orbit  Right-drag or Shift+drag: move  Wheel: zoom  1/2/3: views  R: reset",
             "/: search models   T: texture animation   S: screenshot   Esc: quit",
         };
         for (int i = 0; i < 4; i++) {

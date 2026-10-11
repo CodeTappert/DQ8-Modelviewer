@@ -58,6 +58,7 @@ Press **F1** in the window to show them.
 | Space | Play / pause |
 | `,` / `.` | Step one frame back / forward |
 | Mouse drag | Orbit the camera |
+| Right or middle drag, Shift + drag | Move the model on screen |
 | Mouse wheel | Zoom |
 | 1 / 2 / 3 | Front / side / three-quarter view |
 | R | Reset the camera |
