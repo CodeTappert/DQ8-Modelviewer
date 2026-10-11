@@ -427,23 +427,28 @@ static void last_iso_path(char *out, size_t len)
     snprintf(out, len, "%slast_iso.txt", dq8_platform_pref_dir());
 }
 
-/* --iso, then $DQ8_DATA_DIR / $DQ8_ISO, then the remembered ISO, then a file
- * dialog until a valid ISO is picked or the user cancels. */
+/* --iso, else $DQ8_DATA_DIR or $DQ8_ISO, else the remembered ISO; if that fails
+ * (with a message box for a given path), a file dialog until a valid ISO is
+ * picked or the user cancels. */
 static Dq8Archive *find_disc(const char *iso_arg)
 {
     char path[1024] = "", cfg[1024];
     last_iso_path(cfg, sizeof(cfg));
     Dq8Archive *a = NULL;
-    if (iso_arg) {
-        snprintf(path, sizeof(path), "%s", iso_arg);
-        if (!(a = open_disc(path, 0))) {
-            fprintf(stderr, "cannot open %s as a DQ8 ISO\n", path);
-            return NULL;
+    char msg[1200];
+    if (!iso_arg && getenv("DQ8_DATA_DIR")) {
+        if (!(a = open_disc(getenv("DQ8_DATA_DIR"), 1))) {
+            dq8_platform_message("DQ8 Model Viewer", "DQ8_DATA_DIR does not contain the game's DATA archive.");
         }
-    } else if (getenv("DQ8_DATA_DIR")) {
-        return open_disc(getenv("DQ8_DATA_DIR"), 1);
-    } else if (getenv("DQ8_ISO")) {
-        return open_disc(getenv("DQ8_ISO"), 0);
+        return a;
+    }
+    const char *given = iso_arg ? iso_arg : getenv("DQ8_ISO");
+    if (given) {
+        snprintf(path, sizeof(path), "%s", given);
+        if (!(a = open_disc(path, 0))) {
+            snprintf(msg, sizeof(msg), "Cannot open \"%s\" as a Dragon Quest VIII (PS2) ISO. Pick the ISO instead.", path);
+            dq8_platform_message("DQ8 Model Viewer", msg);
+        }
     } else {
         FILE *f = fopen(cfg, "rb");
         if (f) {
@@ -453,13 +458,13 @@ static Dq8Archive *find_disc(const char *iso_arg)
             fclose(f);
             a = open_disc(path, 0);
         }
-        while (!a) {
-            if (!dq8_platform_pick_file("Dragon Quest VIII ISO", "iso", path, sizeof(path))) {
-                return NULL;
-            }
-            if (!(a = open_disc(path, 0))) {
-                dq8_platform_message("DQ8 Model Viewer", "That file is not a Dragon Quest VIII (PS2) ISO. Pick another one.");
-            }
+    }
+    while (!a) {
+        if (!dq8_platform_pick_file("Dragon Quest VIII ISO", "iso", path, sizeof(path))) {
+            return NULL;
+        }
+        if (!(a = open_disc(path, 0))) {
+            dq8_platform_message("DQ8 Model Viewer", "That file is not a Dragon Quest VIII (PS2) ISO. Pick another one.");
         }
     }
     FILE *f = fopen(cfg, "wb");

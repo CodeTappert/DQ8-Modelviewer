@@ -43,6 +43,7 @@ dq8-model-viewer [filter] [--iso <path to game.iso>] [--anim N]
 
 The ISO is looked up in this order: `--iso`, the `DQ8_ISO` environment variable
 (or `DQ8_DATA_DIR` for an extracted disc), the last ISO you opened, and finally
+the file dialog. If a given ISO cannot be opened, the viewer says so and shows
 the file dialog. To pick a different ISO later, start the viewer with `--iso`.
 
 ### Controls
