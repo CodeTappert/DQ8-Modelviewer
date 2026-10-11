@@ -30,10 +30,12 @@ static int components(int type)
 }
 
 /* Channel header at `ch` (offsets inside are relative to `ch`). Version 1 is
- * 0x20 bytes: u8 flags[4] (scaled, value size, time size, 0), s16, u16 count,
- * u32 times, u32 values, f32[4] scale. Version 0 (converted in place by
- * FUN_0014c310) is 0x40 bytes of u32 words: flags at +0x04/+0x08/+0x0C, count
- * +0x18, times +0x1C, values +0x20, scale at +0x30. Value size codes match the
+ * 0x20 bytes: u8 flags[4] (scaled, value size, time size, 0), s16 start
+ * frame, u16 count, u32 times, u32 values, f32[4] scale. Version 0 (converted
+ * in place by FUN_0014c310) is 0x40 bytes of u32 words: flags at
+ * +0x04/+0x08/+0x0C, start frame +0x14, count +0x18, times +0x1C, values +0x20,
+ * scale at +0x30. The start frame equals the first key time; a channel without
+ * a time array has one key per frame from it. Value size codes match the
  * MDS format word: 0x20 float32, 0x10 int16, 0x08 int8. */
 static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
 {
@@ -43,10 +45,12 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     }
     const uint8_t *p = mot->blob + ch;
     uint32_t count, times, values, scaled, vsize;
+    int start;
     const uint8_t *sc;
     if (mot->version == 0) {
         scaled = rd32(p + 0x04);
         vsize = rd32(p + 0x08);
+        start = (int32_t)rd32(p + 0x14);
         count = rd32(p + 0x18);
         times = rd32(p + 0x1c);
         values = rd32(p + 0x20);
@@ -54,6 +58,7 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     } else {
         scaled = p[0];
         vsize = p[1];
+        start = (int16_t)rd16(p + 4);
         count = rd16(p + 6);
         times = rd32(p + 8);
         values = rd32(p + 12);
@@ -72,10 +77,11 @@ static bool read_channel(Dq8Mot *mot, int type, size_t ch, Dq8MotChannel *out)
     out->value_size = (int)vsize;
     out->scaled = scaled != 0;
     out->count = (int)count;
+    out->start = start;
     out->times = times ? (uint32_t)(ch + times) : 0;
     out->values = (uint32_t)(ch + values);
     memcpy(out->scale, sc, sizeof(out->scale));
-    int last = times ? (int16_t)rd16(mot->blob + out->times + (count - 1) * 2) : (int)count - 1;
+    int last = times ? (int16_t)rd16(mot->blob + out->times + (count - 1) * 2) : start + (int)count - 1;
     if (last + 1 > mot->frame_count) {
         mot->frame_count = last + 1;
     }
@@ -204,7 +210,7 @@ static void key_value(const Dq8Mot *mot, const Dq8MotChannel *c, int k, float ou
 
 static float key_time(const Dq8Mot *mot, const Dq8MotChannel *c, int k)
 {
-    return c->times ? (float)(int16_t)rd16(mot->blob + c->times + (size_t)k * 2) : (float)k;
+    return c->times ? (float)(int16_t)rd16(mot->blob + c->times + (size_t)k * 2) : (float)(c->start + k);
 }
 
 bool dq8_mot_sample_list(const Dq8Mot *mot, int list, int index, int type, float frame,

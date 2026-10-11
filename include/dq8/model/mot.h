@@ -33,7 +33,8 @@ typedef struct Dq8MotChannel {
     int      value_size;    /* 0x20 float32, 0x10 int16, 0x08 int8 */
     bool     scaled;        /* flag byte 0: integer values use `scale` */
     int      count;         /* keys */
-    uint32_t times;         /* offset of s16[count] frame numbers (may be < 0), 0 = per frame */
+    int      start;         /* first key's frame (per-frame keys run from it) */
+    uint32_t times;         /* offset of s16[count] frame numbers (may be < 0), 0 = per frame from `start` */
     uint32_t values;        /* offset of value[count][components] */
     float    scale[4];
 } Dq8MotChannel;
