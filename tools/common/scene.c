@@ -733,6 +733,7 @@ Scene *scene_load(Dq8Archive *a, const char *unit)
     }
 
     Scene *meta = calloc(1, sizeof(*meta));
+    scene_set_view(meta, 0.6109f, 0.2618f);   /* 3/4 view until the caller sets one */
     snprintf(meta->unit, sizeof(meta->unit), "%s", unit);
     scene_note(meta, "unit=%s", unit);
 
@@ -1034,13 +1035,28 @@ int scene_pose(const Scene *s, float frame, float *pose)
     if (!s || !s->m) {
         return 0;
     }
+    int ok = 1;
     if (!s->mot || frame < 0) {
         for (uint32_t b = 0; b < s->m->bone_count; b++) {
             dq8_mds_bone_world(s->m, (int)b, pose + (size_t)b * 16);
         }
-        return 1;
+    } else {
+        ok = pose_at(s->mot, s->rig, s->m, frame, pose);
     }
-    return pose_at(s->mot, s->rig, s->m, frame, pose);
+    if (ok) {   /* billboard bones face the (orthographic) camera: an eye far along the view axis */
+        float cy = cosf(s->view_yaw), sy = sinf(s->view_yaw), cp = cosf(s->view_pitch), sp = sinf(s->view_pitch);
+        float eye[3] = { cp * sy * 1e6f, sp * 1e6f, cp * cy * 1e6f };
+        dq8_mot_billboard(s->m, pose, eye);
+    }
+    return ok;
+}
+
+void scene_set_view(Scene *s, float yaw, float pitch)
+{
+    if (s) {
+        s->view_yaw = yaw;
+        s->view_pitch = pitch;
+    }
 }
 
 void scene_tris(const Scene *s, const float *pose, float frame, int state, SrTriList *out)

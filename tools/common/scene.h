@@ -2,7 +2,7 @@
 #define DQ8_TOOLS_SCENE_H
 
 /* Loading one model pack ("unit") from the ISO into something drawable, for the
- * debug tools (model_sheet, viewer). Wraps the port's decoders with the pairing
+ * viewer. Wraps the port's decoders with the pairing
  * rules found during the model review (the MDS format notes, the MOT format notes):
  *  - the main model is info.cfg's MODEL (never the shadow model);
  *  - motion from the model's own nesting level, else paired packs
@@ -38,6 +38,7 @@ typedef struct Scene {
     Dq8Mot  *mot;
     SceneKey keys[SCENE_MAX_KEYS];
     int      key_count;
+    float    view_yaw, view_pitch;   /* camera for billboard bones, see scene_set_view */
     char    *notes;            /* "key=value\n" lines */
     size_t   notes_len, notes_cap;
 } Scene;
@@ -57,6 +58,10 @@ void scene_note(Scene *s, const char *fmt, ...);
 /* Bone world matrices at `frame` (motion pose), or the export pose when the
  * scene has no motion or frame < 0. `pose` holds m->bone_count * 16 floats. */
 int scene_pose(const Scene *s, float frame, float *pose);
+
+/* Camera direction (softrast yaw/pitch) that billboard bones turn to in
+ * scene_pose. Default: the 3/4 view. */
+void scene_set_view(Scene *s, float yaw, float pitch);
 
 /* Triangles of the model in `pose`. With `state` set, mesh visibility and
  * material opacity come from the motion at `frame` (not when retargeting). */

@@ -333,6 +333,7 @@ static void draw(Viewer *v, Dq8Framebuffer *fb)
     sr_clear(&im, 0, 0, fb->width, fb->height, 0xFF282828u);
     Scene *s = v->scene;
     if (s && s->m) {
+        scene_set_view(s, v->yaw, v->pitch);
         float frame = v->anim >= 0 ? v->frame : (s->key_count ? (float)s->keys[0].start : 0);
         if (v->anim >= 0) {
             scene_pose(s, v->frame, v->pose);

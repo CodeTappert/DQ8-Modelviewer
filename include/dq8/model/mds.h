@@ -104,7 +104,8 @@ int dq8_mds_bone_parent(const Dq8Mds *m, int bone);
 
 /* Bone flags (bone +0x14, copied to the game's mgCFrame +0x26). */
 enum {
-    DQ8_MDS_BONE_BILLBOARD = 0x06,       /* 2/4: faces the camera [not handled] */
+    DQ8_MDS_BONE_BILLBOARD = 0x06,       /* faces the camera, see dq8_mot_billboard */
+    DQ8_MDS_BONE_BILLBOARD_Y = 0x04,     /* ... turning about world Y only (else fully) */
     DQ8_MDS_BONE_SCALE_COMPENSATE = 0x10 /* scale does not shear children, see dq8_mot_pose */
 };
 unsigned dq8_mds_bone_flags(const Dq8Mds *m, int bone);

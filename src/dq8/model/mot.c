@@ -460,6 +460,84 @@ bool dq8_mot_pose_retarget(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *t
     return true;
 }
 
+static void normalize3(float *v)
+{
+    float l = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    for (int i = 0; i < 3 && l > 0; i++) {
+        v[i] /= l;
+    }
+}
+
+static void cross3(const float *a, const float *b, float *out)
+{
+    out[0] = a[1] * b[2] - b[1] * a[2];
+    out[1] = a[2] * b[0] - b[2] * a[0];
+    out[2] = a[0] * b[1] - b[0] * a[1];
+}
+
+/* Orient world matrix W (keeping its axis scales and position) like the
+ * game's mgCFrame update (FUN_00149b30, frame flags & 6). */
+static void billboard(float *W, unsigned flags, const float eye[3])
+{
+    float s[3], x[3], y[3], z[3] = { eye[0] - W[12], eye[1] - W[13], eye[2] - W[14] };
+    for (int r = 0; r < 3; r++) {
+        s[r] = sqrtf(W[r * 4] * W[r * 4] + W[r * 4 + 1] * W[r * 4 + 1] + W[r * 4 + 2] * W[r * 4 + 2]);
+    }
+    if (flags & DQ8_MDS_BONE_BILLBOARD_Y) {   /* turn about the world Y axis only */
+        z[1] = 0;
+        normalize3(z);
+        x[0] = z[2], x[1] = 0, x[2] = -z[0];
+        y[0] = 0, y[1] = 1, y[2] = 0;
+    } else {                                  /* +Z faces the eye, up stays up */
+        static const float up[3] = { 0, 1, 0 };
+        normalize3(z);
+        cross3(up, z, x);
+        normalize3(x);
+        cross3(z, x, y);
+    }
+    for (int c = 0; c < 3; c++) {
+        W[c] = x[c] * s[0];
+        W[4 + c] = y[c] * s[1];
+        W[8 + c] = z[c] * s[2];
+    }
+}
+
+void dq8_mot_billboard(const Dq8Mds *model, float *worlds, const float eye[3])
+{
+    int n = model && worlds && eye ? (int)model->bone_count : 0;
+    float *old = NULL;
+    unsigned char *moved = NULL;
+    for (int b = 0; b < n; b++) {
+        unsigned flags = dq8_mds_bone_flags(model, b);
+        int p = dq8_mds_bone_parent(model, b);
+        int follow = p >= 0 && p < b && moved && moved[p];
+        if (!(flags & DQ8_MDS_BONE_BILLBOARD) && !follow) {
+            continue;
+        }
+        if (!old) {   /* first change: keep the unrotated pose for descendants */
+            old = malloc(sizeof(float) * 16 * (size_t)n);
+            moved = calloc((size_t)n, 1);
+            if (!old || !moved) {
+                break;
+            }
+            memcpy(old, worlds, sizeof(float) * 16 * (size_t)n);
+        }
+        float *W = worlds + (size_t)b * 16;
+        if (follow) {   /* keep the pose relative to the re-oriented parent */
+            float inv[16], rel[16];
+            inv_affine(old + (size_t)p * 16, inv);
+            mat_mul(old + (size_t)b * 16, inv, rel);
+            mat_mul(rel, worlds + (size_t)p * 16, W);
+        }
+        if (flags & DQ8_MDS_BONE_BILLBOARD) {
+            billboard(W, flags, eye);
+        }
+        moved[b] = 1;
+    }
+    free(old);
+    free(moved);
+}
+
 float dq8_mot_name_coverage(const Dq8Mot *mot, const Dq8Mds *rig, const Dq8Mds *target)
 {
     if (!mot || !rig || !target) {
